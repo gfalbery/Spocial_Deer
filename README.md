@@ -1,4 +1,4 @@
-![banner](https://github.com/gfalbery/INLA_N_Out/blob/master/INLA_N_Out2.jpeg)
+![banner](https://github.com/gfalbery/INLA_N_Out/blob/master/INLA_N_Out2.jpg)
 
 # INLA-N'-Out
 
