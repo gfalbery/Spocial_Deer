@@ -1,4 +1,4 @@
-![banner](https://github.com/gfalbery/Spocial_Deer/blob/master/Banner.jpg)
+![banner](https://github.com/gfalbery/Spocial_Deer/blob/master/Banner.jpeg)
 
 ## Fit similarity matrices and spatial locations in linear models!
 
