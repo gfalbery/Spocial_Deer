@@ -17,4 +17,4 @@ All analyses are carried out in `INLA`, using animal models (https://www.ncbi.nl
 
 The component manipulations should be easily transferrable to your data. If they are not, shoot me an email at gfalbery@gmail.com and I'll help troubleshoot.
 
-Accompanies this preprint: 
+Accompanies this preprint: https://www.biorxiv.org/content/10.1101/2020.06.04.135467v1
