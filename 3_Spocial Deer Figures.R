@@ -1,11 +1,11 @@
 
-# 4_Extricating Figures ####
+# 3_Untangling Figures ####
 
 {
   
   library(INLA); library(ggregplot); library(tidyverse); library(GGally); library(patchwork)
   library(cowplot); library(gganimate); library(colorspace); library(RColorBrewer); library(MCMCglmm)
-  library(ggrepel)
+  library(ggrepel); library(magrittr)
   
   theme_set(theme_cowplot() + 
               theme(strip.background = element_rect(fill = "white")))
@@ -19,22 +19,13 @@
   
   AlberColours <- append(AlberColours, list(Pink = "#FD6396", Blue = "#3C78D8")) %>% unlist
   
-  #Palette <- 
-  #  get_colors_from_image(
-  #    "https://raw.githubusercontent.com/HughSt/mappalettes/master/images/nathan-lindahl-1j18807_ul0-unsplash.jpg",
-  #    5)
+  CentralityList <- readRDS("Untangling Code/Output Files/FullCentralityList.rds")
   
-  # Palette2 <- colorRampPalette(Palette)
-  
-  CentralityList <- readRDS("Output Files/FullCentralityList.rds")
-  
-  SPDEList <- readRDS("Output Files/FullSPDEList.rds")
-  TestDFList <- readRDS("Output Files/FullTestDFList.rds")
-  MeshList <- readRDS("Output Files/FullMeshList.rds")
+  SPDEList <- CentralityList %>% map(c("Spatial", "SPDE"))
+  TestDFList <- CentralityList %>% map(c("Data"))
+  MeshList <- CentralityList %>% map(c("Spatial", "Mesh"))
   
   names(SPDEList) <- names(TestDFList) <- names(MeshList) <- Resps
-  
-  ModelLabels = c("Base", "SPDE", "HRO", "Social", "GRM", "HRO+SPDE", "Social+SPDE","GRM+SPDE","HRO+Social","HRO+GRM","Social+GRM","HRO+Social+SPDE","HRO+GRM+SPDE","Social+GRM+SPDE","HRO+Social+GRM","HRO+Social+GRM+SPDE")
   
   RespLabels = c("Group Size", "Degree", "Strength", 
                  "Mean Strength", "Eigenvector", "Weighted Eigenvector", 
@@ -117,60 +108,102 @@ list(
 # Figure 3: Model output ####
 
 CentralityList %>% 
-  map_dfr(~map_df(.x, c("dic", "dic")), .id = "Response") -> 
+  map("DIC") %>% 
+  map(~.x[2:length(.x)]) %>% 
+  map(c(DICTableGet)) %>% 
+  bind_rows(.id = "Response") %>% 
+  mutate_at("Variable", ~.x %>% str_split("f[()]") %>% 
+              map_chr(last) %>% str_split(", ") %>% 
+              map_chr(first) %>% str_remove_all("[*]")
+  ) -> 
   
   DICDF
 
-DICDF %>% mutate_at("Response", ~{
+CentralityList %>% 
+  map("dDIC") %>% 
+  map(c(DICTableGet)) %>% 
+  bind_rows(.id = "Response") %>% 
+  mutate_at("Variable", ~.x %>% str_split("f[()]") %>% 
+              map_chr(last) %>% str_split(", ") %>% 
+              map_chr(first) %>% str_remove_all("[*]")
+  ) -> 
+  
+  dDICDF
+
+dDICDF %>% filter(Kept == 1) %>% 
+  bind_rows(expand.grid(Response = Resps, Round = "0", Variable = "Base", Delta = 0, Kept = 1)) %>% 
+  arrange(Response, Round) -> DICDF
+
+CentralityList %>% map_dbl(c("FinalModel", "dic", "dic")) -> FinalDIC
+
+CentralityList %>% map_dbl(c("Spatial", "Model", "dic", "dic")) %>% 
+  subtract(FinalDIC) -> SpatialDIC
+
+CentralityList %>% map_dbl(c("Spatial", "SpatiotemporalModel", "dic", "dic")) %>% 
+  subtract(CentralityList %>% map_dbl(c("Spatial", "Model", "dic", "dic"))) -> 
+  SpatiotemporallDIC
+
+list(SpatialDIC, SpatiotemporallDIC) %>% map(as.data.frame) %>% 
+  map(~rownames_to_column(.x, "Response") %>% rename(Delta = ".x[[i]]")) %>% 
+  bind_rows(.id = "Variable") %>% 
+  mutate(Round = Variable) %>% 
+  mutate_at("Variable", ~c("Spatial", "Spatiotemporal")[as.numeric(.x)]) %>% 
+  bind_rows(DICDF, .) %>% 
+  group_by(Response) %>% 
+  mutate(DIC = cumsum(Delta)) %>% 
+  mutate(Round = 1:n()) %>% ungroup %>% 
+  mutate_at("Response", ~factor(.x, levels = rev(names(CentralityList)))) %>% 
+  arrange(Response) -> CombinedDICDF
+
+CombinedDICDF %>% group_by(Variable) %>% 
+  summarise_at("Delta", mean) %>% arrange(Delta) %>% 
+  pull(Variable) %>% rev -> VarOrder
+
+VarLabels <- c("Base", "GRM", "HRA", "HRO", "Density", "SPDE", "tSPDE")
+
+names(VarLabels) <- VarOrder
+
+CombinedDICDF %>% 
+  
+  mutate_at("Variable", ~factor(.x, levels = VarOrder)) ->
+  CombinedDICDF
+
+CombinedDICDF %>% mutate_at("Response", ~{
   
   .x %>% str_split("_") %>% 
     map_chr(function(a) sapply(a, function(b) substr(b, 1, 1)) %>% 
               unlist %>% paste0(collapse = ""))
   
 }) %>% pull(Response) %>% 
-  str_replace_all(c("EW" = "WE", "SM" = "MS")) -> DICDF$ResponseLabel
+  str_replace_all(c("EW" = "WE", "SM" = "MS")) %>% 
+  factor(., levels = rev(unique(.))) -> CombinedDICDF$ResponseLabel
 
-DICDF %>%
-  gather("Model", "DIC", -c(Response, ResponseLabel)) %>%
-  group_by(Response) %>%
-  mutate_at("DIC", ~.x - min(.x)) -> LongDICDF
-
-LongDICDF %>% arrange(desc(DIC), Model) %>%
-  mutate_at("Model", ~.x %>% 
-              str_replace_all(c("HROSPDE" = "HRO.AnnualSPDE",
-                              "HROLifetimeSPDE" = "HRO.LifetimeSPDE",
-                              "^SPDE$" = "AnnualSPDE",
-                              "^Temporal$" = "SpatiotemporalSPDE"))) %>% 
-  mutate_at("Model", ~factor(.x, levels = unique(.x))) -> 
-  
-  LongDICDF
-
-LongDICDF %>% 
-  ungroup %>%
-  mutate(Response = factor(Response, levels = names(CentralityList) %>% 
-                             rev)) ->
-  
-  LongDICDF
-
-LongDICDF %>%
-  ggplot(aes(as.numeric(as.factor(Model)), DIC)) + 
+CombinedDICDF %>%
+  ggplot(aes(as.numeric(as.factor(Variable)), GregCube(Delta))) + 
   geom_hline(yintercept = 0, lty = 2, alpha = 0.6) +
   geom_line(aes(colour = Response)) +
+  geom_point(colour = "black", size = 2) + 
   geom_point(aes(colour = Response)) + 
   theme(legend.position = "none") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  theme(axis.title.y = element_text(vjust = -10)) + 
   labs(x = NULL, y = "DeltaDIC") +
-  scale_x_continuous(limits = c(0.25, 7), breaks = 1:7, 
-                     labels = levels(LongDICDF$Model)) +
-  ggrepel::geom_label_repel(data = LongDICDF %>% filter(Model == "Base"), 
-                            aes(x = 1, hjust = 1,
+  scale_x_continuous(limits = c(1, 8), breaks = 1:7, 
+                     labels = VarLabels[levels(CombinedDICDF$Variable)]) +
+  #scale_colour_discrete_sequential(palette = AlberPalettes[[2]],
+  #                                 nmax = 12, 
+  #                                 order = 12:4) +
+  scale_colour_brewer(palette = "Spectral") +
+  scale_fill_brewer(palette = "Spectral") +
+  scale_y_continuous(limits = c(-15, 0), breaks = -c(0:3*5), labels = -c(0:3*5)^3) +
+  ggrepel::geom_label_repel(data = CombinedDICDF %>% filter(Variable == "Spatiotemporal"), 
+                            aes(x = 7, hjust = 0,
                                 label = ResponseLabel, 
-                                colour = Response),
-                            xlim = c(0.1, 1), 
-                            force = 10) +
-  scale_colour_discrete_sequential(palette = AlberPalettes[[2]],
-                                   nmax = 12, 
-                                   order = 12:4) ->
+                                fill = Response),
+                            alpha = 1,
+                            colour = "black",
+                            xlim = c(7.1, 8), 
+                            force = 10) ->
   
   Plot1
 
@@ -182,16 +215,50 @@ RelativeR2 %>%
            str_replace_all(c("IndexPhylo" = "GRM",
                              "ReprodStatus" = "Status",
                              "IndexSpace" = "HRO",
-                             "W" = "SPDE"))) %>%
+                             "W" = "SPDE",
+                             "AnnualDensity" = "Density"))) %>%
   mutate(Colour = as.factor(Label %in% c("SPDE", "Year", "Status"))) %>%
   arrange(desc(Variable)) %>%
-  mutate(Y = c(0, cumsum(R2[1:(n() - 1)]))) %>%
+  mutate(Y = c(0, cumsum(na.omit(R2[1:(n() - 1)])))) %>%
   mutate(Y2 = R2/2) %>%
   mutate(Y3 = Y + Y2) -> 
   
   LabelsRight
 
+RelativeR2 %>% 
+  filter(Response == "GroupSize") %>% 
+  mutate(Label = Variable %>% 
+           str_replace_all(c("IndexPhylo" = "GRM",
+                             "ReprodStatus" = "Status",
+                             "IndexSpace" = "HRO",
+                             "W" = "SPDE",
+                             "AnnualDensity" = "Density"))) %>%
+  mutate(Colour = as.factor(Label %in% c("SPDE", "Year", "Status"))) %>%
+  arrange(desc(Variable)) %>%
+  mutate(Y = c(0, cumsum(na.omit(R2[1:(n() - 1)])))) %>%
+  mutate(Y2 = R2/2) %>%
+  mutate(Y3 = Y + Y2) -> 
+  
+  LabelsLeft
+
+RelativeR2 %>% 
+  group_by(Response) %>% 
+  mutate(Label = Variable %>% 
+           str_replace_all(c("IndexPhylo" = "GRM",
+                             "ReprodStatus" = "Status",
+                             "IndexSpace" = "HRO",
+                             "W" = "SPDE",
+                             "AnnualDensity" = "Density"))) %>%
+  mutate(Colour = as.factor(Label %in% c("SPDE", "Year", "Status"))) %>%
+  arrange(desc(Variable)) %>% na.omit %>% 
+  mutate(Y = c(0, cumsum(R2[1:(n() - 1)]))) %>%
+  mutate(Y2 = R2/2) %>%
+  mutate(Y3 = Y + Y2) -> 
+  
+  LabelsCentre
+
 Plot2 <- 
+  
   RelativeR2 %>%
   ggplot(aes(as.numeric(Response), R2, fill = Variable)) + 
   geom_hline(yintercept = 1, lty = 2, alpha = 0.6) +
@@ -199,49 +266,50 @@ Plot2 <-
   lims(y = c(0, 1)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   scale_x_continuous(breaks = 1:8,
-                     labels = RespLabels) +
-  scale_fill_discrete_sequential(palette = AlberPalettes[[1]]) +
-  scale_colour_discrete_sequential(palette = AlberPalettes[[1]]) +
-  geom_label_repel(data = LabelsRight %>% filter(R2>0.0), 
+                     labels = c(RespLabels)) +
+    scale_fill_discrete_diverging(palette = "Tropic") +
+    scale_colour_discrete_diverging(palette = "Tropic") +
+    scale_fill_discrete_sequential(palette = AlberPalettes[[1]]) +
+    scale_colour_discrete_sequential(palette = AlberPalettes[[1]]) +
+  #scale_fill_discrete_qualitative(palette = "warm") +
+  #scale_colour_discrete_qualitative(palette = "warm") +
+  geom_label_repel(data = LabelsLeft %>% filter(!Variable == "Intercept"), 
                    direction = "y",
-                   #fill = "white",
-                   #label.colour = "black",
                    force = 5,
-                   colour = c(rep("white", 3), rep("black", 7)),
+                   #colour = "black", #c(rep("white", 3), rep("black", 9)),
+                   colour = c(rep("white", 3), rep("black", 9)),
                    segment.color = "black",
                    segment.alpha = c(0.6),
                    aes(label = Label, 
-                       #colour = Variable,
-                       x = 8, y = Y3), nudge_y = 0.2,
-                   xlim = c(9.0, 9.0) + 1) +
-  coord_cartesian(xlim = c(0.5, 10)) +
+                       x = 0.7, y = Y3), nudge_y = 0.2,
+                   xlim = c(0, 0.5)-1) +
+  coord_cartesian(xlim = c(0, 9)-1) +
   theme(legend.position = "none") +
-  labs(y = expression(R^{2}), x = NULL)
+  labs(y = expression(R^{2}), x = NULL) +
+  geom_text(data = LabelsCentre %>% filter(R2>0.05), 
+            aes(y = Y3, label = Label %>% substr(1, 2)), colour = "black")
 
 ModelEffects <- 
   CentralityList[8:1] %>% 
-  map("HROSPDE") %>%
+  map(c("Spatial", "Model")) %>%
   Efxplot(Size = 3,
-    # SigAlpha = T, 
-    Alpha1 = 1, Alpha2 = 0.4,
-    ModelNames = names(CentralityList) %>% 
+          # SigAlpha = T, 
+          Alpha1 = 1, Alpha2 = 0.4,
+          ModelNames = (names(CentralityList)) %>% 
             str_replace_all(c("GroupSize" = "Group size",
                               "Eigenvector_Weighted" = "Weighted Eigenvector",
                               "Strength_Mean" = "Mean strength")) %>% 
-      rev, 
+            rev, 
           Intercept = F, 
           VarNames = rev(c("Intercept", "Age", "Summer_Yeld", "Winter_Yeld", "Milk", 
-                           "Year", "Population", "Observations"))) +
+                           "Year", "Population", "Observations", "HRA", "AnnualDensity"))) +
   theme(legend.position = c(0.6, 0.75), 
-        #legend.box.margin = c(1),
         legend.background = element_rect(fill = "white", 
                                          colour = "white", size = 8-1),
         legend.box.background = element_rect(colour = "white",
                                              size = 10-1)) +
   labs(colour = NULL) +
-  scale_colour_discrete_sequential(palette = AlberPalettes[[2]],
-                                   nmax = 12, 
-                                   order = 12:4) +
+  scale_colour_brewer(palette = "Spectral") +
   guides(colour = guide_legend(reverse = T)) +
   geom_point(colour = "black", aes(group = Model), 
              #alpha = graph$Alpha,
@@ -258,103 +326,17 @@ ModelEffects <-
   ggsave("Untangling Code/Figures/Figure3.jpeg", units = "mm", 
          width = 250, height = 280, dpi = 600)
 
-
-# Getting errors ####
-
-CentralityList %>% map(~INLARep(.x,
-                                SPDEModel = DeerSPDE,
-                                Return = "Summary",
-                                Draw = T, NDraw = 1000
-)) ->
-  
-  VarianceEstimates
-
-CentralityList %>% map(~INLARep(.x,
-                                SPDEModel = DeerSPDE,
-                                Return = "Summary",
-                                SPDEComponent = "Tau",
-                                Draw = T, NDraw = 1000
-)) ->
-  
-  VarianceEstimatesTau
-
-VarianceEstimates %>% bind_rows(.id = "Model") %>% 
-  bind_cols(VarianceEstimatesTau %>% bind_rows(.id = "Model") %>% 
-              rename_all(~paste0(.x, ".Tau"))) -> CompareVariances
-
-CompareVariances %>%
-  ggplot(aes(Mean, Mean.Tau)) + geom_point(aes(colour = Component))
-
-CentralityList %>% map(c("summary.hyperpar", "mean")) %>% map_dbl(6)
-
-CompareVariances %>% mutate(Ratio = (Mean - Mean.Tau)/Mean.Tau) %>%
-  filter(Component == "SPDE") -> SPDECompareVariances
-
-CentralityList %>% map(c("summary.hyperpar", "mean")) %>% map_dbl(6) ->
-  
-  SPDECompareVariances$Range
-
-SPDECompareVariances %>% ggplot(aes(Range, Ratio)) + geom_point()
-
-CentralityList %>% map(~INLARep(.x,
-                                SPDEModel = DeerSPDE
-)) ->
-  
-  VarianceEstimatesMean
-
-CentralityList %>% map(~INLARep(.x,
-                                SPDEModel = DeerSPDE,
-                                Draw = T, NDraw = 1000
-)) ->
-  
-  VarianceEstimatesRaw
-
-VarianceEstimatesRaw[[1]] %>% 
-  gather("Component", "Value") %>%
-  ggplot(aes(Component, Value)) + 
-  ggforce::geom_sina(scale = "width") +
-  geom_point(data = VarianceEstimatesMean[[1]] %>% 
-               mutate(Component = rownames(VarianceEstimatesMean[[1]])), aes(y = Mean),
-             size = 5, colour = AlberColours[[2]]) +
-  geom_point(data = VarianceEstimates[[1]], aes(y = Mean),
-             size = 5, colour = AlberColours[[1]])
-
-VarianceEstimatesRaw %>% bind_rows(.id = "Model") %>% 
-  mutate(Ratio = SPDE/IndexSpace) %>% 
-  ggplot(aes(Model, Ratio)) + 
-  geom_boxplot() +
-  ggforce::geom_sina()
-
-VarianceEstimatesRaw %>% bind_rows(.id = "Model") %>% 
-  mutate(Ratio = SPDE/(SPDE + IndexSpace)) %>% 
-  mutate(Model = fct_reorder(Model, Ratio)) %>%
-  ggplot(aes(Model, Ratio)) + 
-  geom_boxplot() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  ggforce::geom_sina()
-
-VarianceEstimates[[6]] %>% #
-  
-  ggplot(aes(Component, Mean)) + geom_point() +
-  
-  geom_errorbar(aes(ymin = Lower, ymax = Upper))
-
-
-VarianceEstimates %>% lapply(function(a) a %>% gather %>% ggplot(aes(key, value)) + 
-                               ggforce::geom_sina(scale = "width")
-) %>% arrange_ggplot2
-
 # Figure 4: Spatial fields ####
 
 jpeg(filename = "Untangling Code/Figures/Figure4.jpeg", 
-     units = "mm", height = 300, width = 150, res = 600)
+     units = "mm", height = 150, width = 300, res = 600)
 
 c(1:length(CentralityList)) %>% lapply(function(a){
   
-  ggField(CentralityList[[a]]$HROSPDE, 
-          MeshList[[a]]$AnnualMesh, 
+  ggField(CentralityList[[a]]$Spatial$Model, 
+          MeshList[[a]], 
           #Fill = "Continuous", 
-          Boundary = boundary[,c("Easting", "Northing")]) + 
+          Boundary = Boundary[,c("Easting", "Northing")]) + 
     theme_cowplot() +
     labs(fill = SmallRespLabels[a]) +
     theme(legend.title = element_text(size = 9)) +
@@ -363,12 +345,98 @@ c(1:length(CentralityList)) %>% lapply(function(a){
     labs(x = NULL, y = NULL) +
     scale_fill_discrete_sequential(palette = AlberPalettes[[3]])
 }) %>%
-  plot_grid(plotlist = ., nrow = 2, labels = "AUTO") 
+  plot_grid(plotlist = ., nrow = 2, ncol = 4, labels = "AUTO") 
 
 dev.off()
 
-jpeg(filename = "Untangling Code/Figures/Figure4B.jpeg", 
-     units = "mm", height = 150, width = 300, res = 600)
+# Figure 5: Density Effects ####
+
+SpocialList <- CentralityList
+
+Covar <- c("ReprodStatus", "Age", "AnnualDensity",
+           "Year", "PopN", "NObs")
+
+a <- Resps[1]
+
+Figure1aList <- LabelYList <- LabelList <- LabelXList <- list()
+
+for(a in Resps){
+  
+  print(a)
+  
+  TestHinds <- TestDFList[[a]]
+  SocMesh <- MeshList[[a]]
+  
+  X = seq(min(TestDFList[[a]]$AnnualDensity), 
+          max(TestDFList[[a]]$AnnualDensity), 
+          length.out = nrow(TestHinds)) %>% c
+  
+  B = summary(SpocialList[[a]]$Spatial$Model)$fixed["AnnualDensity","mean"]
+  A = summary(SpocialList[[a]]$Spatial$Model)$fixed[,"mean"]%*%t(SpocialList[[a]]$Spatial$Model$model.matrix) %>% mean
+  Y = A + B*X
+  
+  SpocialList[[a]]$Spatial$Model %>% 
+    INLAFit(TestDFList[[a]], 
+            Locations = TestDFList[[a]][,c("E", "N")],
+            SPDEModel = SPDEList[[a]],
+            Mesh = MeshList[[a]],
+            FixedCovar = Covar, 
+            NDraw = 100, Draw = T) %>% map_dbl(mean) -> Intercepts
+  
+  SpocialList[[a]]$Spatial$Model %>% 
+    GetEstimates("AnnualDensity", NDraw = 100, Draws = T) -> Slopes
+  
+  1:length(Slopes) %>% map(~data.frame(X = X,
+                                       Y = X*Slopes[[.x]] + Intercepts[[.x]]) %>% 
+                             slice(1, n())) -> SlopeDF
+  
+  SlopeDF %<>% bind_rows(.id = "Rep")
+  
+  FitLine <- data.frame(
+    AnnualDensity = rep(X, 1),
+    Y = c(Y),
+    Model = c("AnnualDensity")
+  )
+  
+  TestHinds$Y <- TestHinds[,a]
+  
+  SpocialList[[a]]$Spatial$Model %>% 
+    
+    GetEstimates(Variable = "AnnualDensity") %>%
+    paste0("; P = ", SpocialList[[a]]$Spatial$Model  %>% INLAPValue("AnnualDensity")) -> 
+    LabelList[[a]]
+  
+  LabelYList[[a]] <- max(TestHinds$Y + diff(range(TestHinds$Y))/10)
+  
+  LabelXList[[a]] <- median(X)
+  
+  LabelDf <- data.frame(
+    
+    AnnualDensity = LabelXList[[a]],
+    Y = LabelYList[[a]],
+    Label = LabelList[[a]]
+    
+  )
+  
+  Figure5List[[a]] <- 
+    ggplot(data = TestHinds, aes(AnnualDensity, Y)) + 
+    geom_point(alpha = 0.1, colour = AlberColours[[1]]) + 
+    geom_line(alpha = 0.1, data = SlopeDF, aes(X, Y, group = Rep)) +
+    #geom_line(alpha = 0.1, data = SlopeDF2, aes(X, Y, group = Rep), 
+    #          colour = "grey") +
+    geom_line(data = FitLine, size = 1)  +
+    labs(y = a, x = "Annual density") +
+    scale_linetype_manual(values = 1:2,
+                          breaks = c("AnnualDensity", "HROSPDE.AnnualDensity"),
+                          labels = c("Base", "SPDE")) +
+    geom_text(data = LabelDf, aes(label = Label), hjust = 0.5,
+              colour = AlberColours[[1]], size = 3)# %>% plot
+  
+}
+
+Figure1aList %>% ArrangeCowplot(
+
+)
 
 # Supplementary Information Figures ####
 
@@ -451,6 +519,33 @@ ggpairs(SocialHinds[,SocResps],
 
 dev.off()
 
+# Model Effects ####
+
+CentralityList %>% map("Base") %>% Efxplot
+
+1:length(CentralityList) %>% 
+  map(~CentralityList[[.x]][c("Base","SPDE")] %>% 
+        map("summary.fixed")) %>% 
+  unlist(recursive = F) %>% 
+  map(c(as.data.frame, rownames_to_column)) %>% 
+  bind_rows(.id = "Model") -> Output
+
+Output$Model %>% table() %>% extract2(1) %>% 
+  divide_by(length(CentralityList)) %>% 
+  rep(names(CentralityList), each = .) %>% rep(each = 2) ->
+  Output$Response
+
+Output %>% 
+  filter(!rowname == "Intercept") %>% 
+  ggplot(aes(rowname, mean, colour = Model)) + 
+  geom_hline(yintercept = 0, lty = 2, size = 1, alpha = 0.3) +
+  geom_errorbar(position = position_dodge(w = 0.5),
+                aes(ymin = `0.025quant`, ymax = `0.975quant`)) +
+  geom_point(position = position_dodge(w = 0.5)) + 
+  facet_wrap(~Response, ncol = 2) + coord_flip() +
+  scale_colour_manual(values = c(AlberColours[[1]], AlberColours[[2]])) +
+  ggsave("Untangling Code/Figures/FigureSI13.jpeg", units = "mm", width = 200, height = 300)
+
 # Figure SI3: INLA Ranges ####
 
 ggsave("Untangling Code/SIFigures/FigureSI7.jpeg", units = "mm", height = 300, width = 250, res = 600)
@@ -517,6 +612,62 @@ HROPlot <-
 
 HROPlot + ggsave(file = "SIFigure4.jpeg", units = "mm", width = 200, height = 200, dpi = 600)
 
+# Figure SI5: Spatiotemporal density etc. ####
+
+SpocialList %>% map("dDIC") %>% 
+  map(DICTableGet) %>% bind_rows(.id = "Response") %>% 
+  mutate_at("Variable", ~str_remove_all(.x, "[*]")) -> DensityVarDIC
+
+DensityVarDIC %>% 
+  group_by(Variable) %>% 
+  summarise_at("Delta", mean) %>% arrange(Variable) %>% 
+  pull(Variable) %>% rev -> DensityVarOrder
+
+DensityVarDIC %>% 
+  
+  mutate_at("Variable", ~factor(.x, levels = DensityVarOrder)) ->
+  DensityVarDIC
+
+DensityVarDIC %>% mutate_at("Response", ~{
+  
+  .x %>% str_split("_") %>% 
+    map_chr(function(a) sapply(a, function(b) substr(b, 1, 1)) %>% 
+              unlist %>% paste0(collapse = ""))
+  
+}) %>% pull(Response) %>% 
+  str_replace_all(c("EW" = "WE", "SM" = "MS")) %>% 
+  factor(., levels = rev(unique(.))) -> DensityVarDIC$ResponseLabel
+
+DensityVarDIC %>%
+  ggplot(aes(as.numeric(as.factor(Variable)), GregCube(Delta))) + 
+  geom_hline(yintercept = 0, lty = 2, alpha = 0.6) +
+  geom_line(aes(colour = Response)) +
+  geom_point(colour = "black", size = 2) + 
+  geom_point(aes(colour = Response)) + 
+  theme(legend.position = "none") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  theme(axis.title.y = element_text(vjust = -10)) + 
+  labs(x = NULL, y = "DeltaDIC") +
+  scale_x_continuous(limits = c(1, 8), breaks = 1:7, 
+                     labels = VarLabels[levels(CombinedDICDF$Variable)]) +
+  #scale_colour_discrete_sequential(palette = AlberPalettes[[2]],
+  #                                 nmax = 12, 
+  #                                 order = 12:4) +
+  scale_colour_brewer(palette = "Spectral") +
+  scale_fill_brewer(palette = "Spectral") +
+  scale_y_continuous(limits = c(-15, 0), breaks = -c(0:3*5), labels = -c(0:3*5)^3) +
+  ggrepel::geom_label_repel(data = CombinedDICDF %>% filter(Variable == "Spatiotemporal"), 
+                            aes(x = 7, hjust = 0,
+                                label = ResponseLabel, 
+                                fill = Response),
+                            alpha = 1,
+                            colour = "black",
+                            xlim = c(7.1, 8), 
+                            force = 10) ->
+  
+  Plot1
+
+
 # Figures SI5-12: Spatiotemporal fields ####
 
 a <- 1
@@ -549,6 +700,23 @@ a <- 1
   
 })
 
+# SISomething: Model effect comparisons ####
+
+CentralityList %>% 
+  map(~.x[c("Base", "HROSPDEDensity")] %>% 
+        Efxplot(ModelNames = c("Base", "Spatial"))) -> EffectComparisonList
+
+EffectComparisonList[[1]] + 
+  EffectComparisonList[[2]] + 
+  EffectComparisonList[[3]] + 
+  EffectComparisonList[[4]] + 
+  EffectComparisonList[[5]] + 
+  EffectComparisonList[[6]] + 
+  EffectComparisonList[[7]] + 
+  EffectComparisonList[[8]] + 
+  plot_layout(nrow = 4, guides = "collect") +
+  plot_annotation(tag_levels = "A")
+
 # Little figures for schematic ####
 
 Censuses %>% 
@@ -559,11 +727,24 @@ SocTestHinds %>%
   ggplot(aes(E, N)) + 
   geom_point(alpha = 0.5) + theme_void() + coord_fixed() -> CentroidPlot
 
+LifetimeKUDL@coords %>% as.data.frame() %>% 
+  rename(Y = Var1, X = Var2) %>% 
+  mutate(Density = LifetimeKUDL$ud) %>% 
+  filter(Density>0.000005) %>% 
+  ggplot(aes(X, Y, fill = Density)) + 
+  geom_tile() + coord_fixed() +
+  scale_fill_gradient2(low = "grey", high = "black") + 
+  theme_void() + 
+  theme(legend.position = "none") +
+  geom_contour(aes(z = Density), 
+               colour = "white", size = 1, alpha = 0.8) ->
+  DensityPlot
+
 ObservationPlot +
   ggsave("Untangling Code/SIFigures/Observations.jpeg", units = "mm", width = 120, height = 150)
 
 CentroidPlot +
   ggsave("Untangling Code/SIFigures/Centroids.jpeg", units = "mm", width = 120, height = 150)
 
-
-
+DensityPlot +
+  ggsave("Untangling Code/SIFigures/Density.jpeg", units = "mm", width = 120, height = 150)

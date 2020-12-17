@@ -8,15 +8,7 @@ Root <- "Data"
 
 library(tidyverse);library(reshape2);library(igraph); library(ggregplot)
 
-load("Output Files/GRM.Rdata")
-
-Resps <- c("GroupSize", "Degree", "Strength", "Strength2", "Eigenvector", "Eigenvector2")
-Perm_Resps <- paste0("Perm_",Resps)
-
-Assoce<-function(Name){
-  grouplist<-c(Censuses2[Censuses2$Code==Name,"GroupDate"])
-  table(Censuses2[Censuses2$GroupDate%in%grouplist,"Code"])
-}
+# Cleaning the phenotypic data ####
 
 Censuses <- read.csv(paste0(Root, "/FullCensuses.csv"))
 Dates <- read.csv(paste0(Root, "/Dates.csv"))
@@ -85,7 +77,7 @@ SEASON = "Rut"
 
 Records = 5
 
-RutAMList <- longlist <- NetList <- list()
+RutAMList <- longlist <- list()
 
 for(x in (min(Censuses$Year,na.rm=TRUE):2017)){
   
@@ -100,9 +92,12 @@ for(x in (min(Censuses$Year,na.rm=TRUE):2017)){
     SocGraph <- graph.incidence(M, weighted = T)
     DeerProj <- bipartite.projection(SocGraph)$proj1
     AssMat <- DeerProj %>% get.adjacency(attr = "weight") %>% as.matrix 
+    
     NObs <- diag(AssMat) <- table(Censuses2$Code)
     
     N <- nrow(AssMat)
+    
+    # Making proportional ####
     
     A <- matrix(rep(table(Censuses2$Code), N), N)
     B <- matrix(rep(table(Censuses2$Code), each = N), N)
@@ -110,7 +105,10 @@ for(x in (min(Censuses$Year,na.rm=TRUE):2017)){
     AM <- AssMat/(A + B - AssMat)
     
     diag(AssMat) <- diag(AM) <- 0
+    
     RutAMList[[x-(min(Censuses$Year,na.rm=TRUE)-1)]] <- AM
+    
+    # Making graph and deriving node traits ####
     
     DeerGraph <- graph_from_adjacency_matrix(AM, weighted = TRUE, mode = "undirected")
     
@@ -144,21 +142,6 @@ for(x in (min(Censuses$Year,na.rm=TRUE):2017)){
     
     rownames(Subdf) <- Subdf$Name
     
-    GRMNames <- intersect(colnames(AM), colnames(GRM))
-    
-    AMNorelatives <- AM[GRMNames,GRMNames]
-    
-    SubGRM <- GRM[GRMNames,GRMNames]
-    
-    AMNorelatives[SubGRM>0.2] <- 0
-    
-    StrengthSums <- colSums(AMNorelatives)
-    DegreeSums <- colSums(AMNorelatives>0)
-    
-    Subdf$NoRelStrength <- StrengthSums[as.character(Subdf$Name)]
-    Subdf$NoRelDegree <- DegreeSums[as.character(Subdf$Name)]
-    Subdf$NoRelStrength_Mean <- with(Subdf, NoRelStrength/NoRelDegree)
-    
     longlist[[x-(min(Censuses$Year,na.rm=TRUE)-1)]] <- Subdf
     
     longlist[[x-(min(Censuses$Year,na.rm=TRUE)-1)]]$Reg6 <- with(longlist[[x-(min(Censuses$Year,na.rm=TRUE)-1)]], LocToReg6(E, N))
@@ -176,6 +159,3 @@ Resps <- c("GroupSize", "Degree",
            "Eigenvector", "Eigenvector_Weighted",
            "Betweenness", "Clustering")
 
-WideResps <- Resps %>% 
-  rep(2) %>% 
-  paste0(rep(c(".Rut",".Spring"), each = 8))
