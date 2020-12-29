@@ -1,11 +1,14 @@
 
-# Predictions etc ####
+# Predictions ####
+
+# Takes the models and uses them to predict values, to estimate each covariate's impact on model fit.
 
 library(INLA); library(ggregplot); library(tidyverse); library(cowplot); library(ggpointdensity);
 library(colorspace)
 
 theme_set(theme_cowplot())
 
+# Run the script `X_Appending Centrality Lists.r` to make this file
 CentralityList <- readRDS("Output Files/FullCentralityList.rds")
 
 SPDEList <- CentralityList %>% map(c("Spatial", "SPDE"))
@@ -16,18 +19,24 @@ names(SPDEList) <- names(TestDFList) <- names(MeshList) <- Resps[1:length(SPDELi
 
 FitList <- list()
 
+# Loops through response variables ####
+
 for(cl in Resps){
   
   print(cl)
   
   TestDF <- TestDFList[[cl]]#[[1]]
   
-  CentralityList[[cl]]$dDIC %>% last %>% data.frame() %>% rownames_to_column("Var") %>% rename(Delta = ".") %>% 
+  CentralityList[[cl]]$dDIC %>% last %>% data.frame() %>% 
+    rownames_to_column("Var") %>% rename(Delta = ".") %>% 
     filter(Delta> -2) %>% 
     pull(Var) %>% str_split("f[()]") %>% 
     map_chr(last) %>% str_split(", ") %>% 
     map_chr(first) %>% 
-    setdiff(c("Age", "ReprodStatus", "Year", "PopN", "NObs", "AnnualDensity", "HRA"), .) -> Covar
+    setdiff(c("Age", "ReprodStatus", "Year", "PopN", "NObs", "AnnualDensity", "HRA"), .) -> 
+    Covar # Derives covariate names
+  
+  # Gets the fitted values ####
   
   Fits <- INLAFit(Model = CentralityList[[cl]]$Spatial$Model, 
                   TestDF = TestDF,
@@ -64,6 +73,8 @@ for(cl in Resps){
   
   PlotList <- list()
   
+  # Loops through the covariates ####
+  
   for(r in AlterVar){
     
     print(r)
@@ -96,6 +107,8 @@ for(cl in Resps){
   
 }
 
+# Outputting the R2 ####
+
 Resps[1:length(FitList)] %>% 
   
   map_dfr(~FitList[[.x]] %>% 
@@ -120,7 +133,7 @@ R2DF %>%
   
   RelativeR2
 
-saveRDS(RelativeR2, file = "Output Files/RelativeR2DF.rds")
+saveRDS(RelativeR2, file = "Output Files/RelativeR2DF.rds") # Saving 
 
 RelativeR2 %>% 
   ungroup %>%

@@ -1,6 +1,9 @@
 
 # 1_Untangling Model Addition ####
 
+# Much the same as the model addition R code, but trialling other temporal formulations ####
+# Annual metrics were universally preferred ####
+
 library(INLA); library(ggregplot); library(tidyverse); library(fs); library(magrittr)
 
 detach(package:raster); 

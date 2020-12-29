@@ -1,7 +1,6 @@
 
-# 3_Untangling Figures ####
-
-{
+# 3_Spocial Deer Figures ####
+{ # Import files/setup ####
   
   library(INLA); library(ggregplot); library(tidyverse); library(GGally); library(patchwork)
   library(cowplot); library(gganimate); library(colorspace); library(RColorBrewer); library(MCMCglmm)

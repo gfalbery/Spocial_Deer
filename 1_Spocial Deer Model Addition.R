@@ -6,6 +6,8 @@ library(INLA); library(ggregplot); library(tidyverse); library(fs); library(magr
 detach(package:raster); 
 library(dplyr)
 
+# Setting up ####
+
 dir_create("Output Files")
 
 CentralityList <- MeshList <- SPDEList <- TestDFList <- list()
@@ -31,7 +33,7 @@ Cols <- c("Name",
           "LifetimeE", "LifetimeN", 
           "MeshInclude")
 
-# Dummy df ####
+# Making a dummy data frame ####
 
 r <- 1
 
@@ -75,6 +77,8 @@ DeerNames <- sort(DeerNames)
 
 FamilyList <- rep("gaussian", length(Resps))
 
+# Removing outliers
+
 OutlierLimits <- 
   list(c(-Inf, 50),
        c(-Inf, Inf),
@@ -87,6 +91,11 @@ OutlierLimits <-
 
 SpocialList <- list()
 
+# Looping through response variables ####
+# Use a loop, not a map/apply: these models take time.
+# After this, run the script `X_Appending Centrality Lists.r` 
+# to combine model files into a single list.
+
 r <- 1
 
 for(r in r:length(Resps)){
@@ -98,7 +107,9 @@ for(r in r:length(Resps)){
     which() %>%
     slice(SocialHinds, .) ->
     
-    SocTestHinds
+    SocTestHinds # Test data frame
+  
+  # Cleaning test data frame ####
   
   SocTestHinds %>% 
     
@@ -116,9 +127,7 @@ for(r in r:length(Resps)){
     as.data.frame() %>%
     mutate_at(c(SocResps, "NObs"), ~c(scale(.x))) ->
     
-    SocTestHinds
-  
-  # Adding Covariates ####
+    SocTestHinds 
   
   SpaceContacts <- as(solve(HRO[DeerNames, DeerNames]),"dgCMatrix")
   GRMatrix <- as(solve(GRM[DeerNames, DeerNames]),"dgCMatrix")
@@ -126,7 +135,7 @@ for(r in r:length(Resps)){
   SocTestHinds$IndexSpace = unlist(sapply(SocTestHinds$Name, function(a) which(DeerNames==a)))
   SocTestHinds$IndexPhylo = unlist(sapply(SocTestHinds$Name, function(a) which(DeerNames==a)))
   
-  if(1){
+  if(1){ # Log-transforming HRA
     
     SocTestHinds %<>% 
       mutate_at("HRA", ~log(.x))
@@ -138,7 +147,11 @@ for(r in r:length(Resps)){
   ToScale <- names(Classes[Classes %in% c("integer", "numeric")]) %>% 
     setdiff(c("Eigenvector","Eigenvector2","E","N", "IndexSpace", "IndexPhylo"))
   
-  SocTestHinds %<>% mutate_at(ToScale, ~c(scale(.x)))
+  SocTestHinds %<>% mutate_at(ToScale, ~c(scale(.x))) # Scaling
+  
+  # Conducting model addition (function found in the `ggregplot` package) ####
+  # Adds each variable, keeping the best-fitting one, until eventually all of them are fitted
+  # Then adds SPDE effect
   
   IM1 <- INLAModelAdd(
     
@@ -151,13 +164,13 @@ for(r in r:length(Resps)){
     RandomModel = rep("iid", 2),
     Family = "gaussian", 
     Delta = -Inf,
-    AddSpatial = T, Coordinates = c("E", "N"), Boundary = RumBoundary,
+    AddSpatial = T, Coordinates = c("E", "N"), #Boundary = RumBoundary,
     Groups = T, GroupVar = "Year"
     
   )
   
   SpocialList[[Resps[r]]] <- IM1
   
-  IM1 %>% saveRDS(paste0("Output Files/", Resps[r], "Models.rds"))
+  IM1 %>% saveRDS(paste0("Output Files/", Resps[r], "Models.rds")) # Saving
   
 }
