@@ -8,13 +8,15 @@ The response variables in this analysis are social network position traits in a 
 
 The variance components (random effects) are: 
 - Genetic similarity matrix
-- Home range overlap matrix (constructed in the package `AdeHabitatHR`) 
-- INLA spatial SPDE effects (lifetime centroids, annual centroids, and spatiotemporally varying)
+- Home range overlap matrix (representing space sharing; constructed in the package `AdeHabitatHR`) 
+- INLA spatial SPDE effects (representing point location effects)  
 
-The fixed explanatory variables are a set of phenotypic and environmental traits for the deer, all of which were compared with the spatiotemporal effects.
+The fixed explanatory variables are a set of phenotypic and environmental traits for the deer, all of which were compared with the spatiotemporal effects, alongside two spatially varying components:
+- Home range size (representing individual ranging capacity)  
+- Local population density (representing the local spatial availability of social partners)  
 
 All analyses are carried out in `INLA`, using animal models (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3737164/).
 
 The component manipulations should be easily transferrable to your data. If they are not, shoot me an email at gfalbery@gmail.com and I'll help troubleshoot.
 
-Accompanies this preprint: https://www.biorxiv.org/content/10.1101/2020.06.04.135467v1
+Accompanies this paper: https://onlinelibrary.wiley.com/doi/10.1111/ele.13684
